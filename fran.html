@@ -140,7 +140,7 @@
     modo = m;
     $("manual").setAttribute("aria-pressed", m === "manual");
     $("auto").setAttribute("aria-pressed", m === "auto");
-    document.querySelectorAll(".dir, #disparar").forEach(b => b.disabled = (m === "auto"));
+    document.querySelectorAll(".dir, #laser").forEach(b => b.disabled = (m === "auto"));
     enviarComando("modo_" + m);
   }
   $("manual").onclick = () => setModo("manual");
