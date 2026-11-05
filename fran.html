@@ -21,6 +21,12 @@
     position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center}
   .camara video{width:100%;height:100%;object-fit:contain;display:none}
   .camara.on video{display:block}
+  .leyenda{position:absolute;left:0;right:0;bottom:0;z-index:2;display:flex;flex-wrap:wrap;gap:6px 14px;
+    justify-content:center;align-items:center;padding:8px 10px;background:rgba(0,0,0,.6);font-size:12px}
+  .chip{display:flex;align-items:center;gap:5px;font:inherit;font-size:12px;color:var(--ink);cursor:pointer;
+    background:transparent;border:1px solid transparent;border-radius:14px;padding:3px 9px}
+  .chip::before{content:"";width:12px;height:12px;border-radius:3px;background:var(--c,#999)}
+  .chip[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
   .camara .msg{color:var(--muted);text-align:center;padding:12px}
   .camara.on .msg{display:none}
   .camara .mira{position:absolute;inset:0;pointer-events:none;display:none}
@@ -85,6 +91,14 @@
     <button class="power" id="power"><i></i><span>Encendido / Apagado</span></button>
     <video id="video" autoplay playsinline muted></video>
     <div class="mira"></div>
+    <div class="leyenda" role="group" aria-label="Color a seguir">
+      <span>Seguir:</span>
+      <button class="chip" data-c="todos" aria-pressed="true">Todos</button>
+      <button class="chip" data-c="rojo" style="--c:#e5484d" aria-pressed="false">Rojo</button>
+      <button class="chip" data-c="verde" style="--c:#3fb950" aria-pressed="false">Verde</button>
+      <button class="chip" data-c="azul" style="--c:#3b82f6" aria-pressed="false">Azul</button>
+      <button class="chip" data-c="amarillo" style="--c:#f2c94c" aria-pressed="false">Amarillo</button>
+    </div>
     <p class="msg" id="msg">Cámara apagada</p>
   </section>
 
@@ -108,11 +122,32 @@
   const estado = $("estado");
   let modo = "manual", laser = false;
 
-  // Punto único para conectar con tu hardware (ESP32, Arduino, servidor, etc.).
-  // Ejemplo: fetch("http://192.168.0.50/cmd?c=" + comando)
-  function enviarComando(comando){
-    console.log("Comando:", comando);
-    estado.textContent = "Comando: " + comando;
+  // Los comandos van al servidor Python (mismo túnel que el video) y de ahí al ESP32.
+  // Mirar la cámara es libre; controlar requiere la clave que pusiste en servidor.py.
+  let clave = sessionStorage.getItem("clave") || "";
+  async function enviarComando(comando){
+    if(!clave){
+      clave = prompt("Clave de control:") || "";
+      if(!clave){ estado.textContent = "Sin clave: solo podés mirar."; return false; }
+    }
+    try{
+      const r = await fetch(SERVER_URL + "/cmd", {
+        method: "POST",
+        headers: {"Content-Type":"application/json", "X-Clave": clave},
+        body: JSON.stringify({c: comando})
+      });
+      if(r.status === 401){
+        clave = ""; sessionStorage.removeItem("clave");
+        estado.textContent = "Clave incorrecta."; return false;
+      }
+      if(!r.ok){ estado.textContent = "El servidor no aceptó: " + comando; return false; }
+      sessionStorage.setItem("clave", clave);
+      estado.textContent = "Enviado: " + comando;
+      return true;
+    }catch(e){
+      estado.textContent = "No se pudo enviar el comando.";
+      return false;
+    }
   }
 
   // ====== CONFIGURACIÓN ======
@@ -184,7 +219,10 @@
 
   // Modo manual / automático
   function setModo(m){
+    if(m === modo) return;
     modo = m;
+    laser = (m === "auto"); // el servidor prende el láser en automático y lo apaga al volver
+    $("laser").setAttribute("aria-pressed", laser);
     $("manual").setAttribute("aria-pressed", m === "manual");
     $("auto").setAttribute("aria-pressed", m === "auto");
     document.querySelectorAll(".dir, #laser").forEach(b => b.disabled = (m === "auto"));
@@ -194,13 +232,21 @@
   $("auto").onclick = () => setModo("auto");
 
   // Movimiento
+  // Mantener apretado = movimiento continuo
+  let repetir = null, presionado = false;
+  function parar(){ presionado = false; clearInterval(repetir); repetir = null; }
   document.querySelectorAll(".dir").forEach(b => {
-    b.addEventListener("click", () => enviarComando(b.dataset.d));
+    b.addEventListener("pointerdown", async e => {
+      e.preventDefault(); parar(); presionado = true;
+      const ok = await enviarComando(b.dataset.d);
+      if(ok && presionado) repetir = setInterval(() => enviarComando(b.dataset.d), 120);
+    });
+    ["pointerup","pointerleave","pointercancel"].forEach(ev => b.addEventListener(ev, parar));
   });
   const teclas = {ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right"};
   addEventListener("keydown", e => {
     const d = teclas[e.key];
-    if(d && modo === "manual"){
+    if(d && modo === "manual" && !(e.repeat && !clave)){
       e.preventDefault();
       const b = document.querySelector(`.dir[data-d="${d}"]`);
       b.classList.add("pres"); enviarComando(d);
@@ -209,6 +255,15 @@
   addEventListener("keyup", e => {
     const d = teclas[e.key];
     if(d) document.querySelector(`.dir[data-d="${d}"]`).classList.remove("pres");
+  });
+
+  // Elegir qué color seguir
+  document.querySelectorAll(".chip").forEach(b => {
+    b.onclick = async () => {
+      if(await enviarComando("color_" + b.dataset.c)){
+        document.querySelectorAll(".chip").forEach(x => x.setAttribute("aria-pressed", x === b));
+      }
+    };
   });
 
   // Disparar y láser
