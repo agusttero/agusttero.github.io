@@ -123,25 +123,14 @@
   let modo = "manual", laser = false;
 
   // Los comandos van al servidor Python (mismo túnel que el video) y de ahí al ESP32.
-  // Mirar la cámara es libre; controlar requiere la clave que pusiste en servidor.py.
-  let clave = sessionStorage.getItem("clave") || "";
   async function enviarComando(comando){
-    if(!clave){
-      clave = prompt("Clave de control:") || "";
-      if(!clave){ estado.textContent = "Sin clave: solo podés mirar."; return false; }
-    }
     try{
       const r = await fetch(SERVER_URL + "/cmd", {
         method: "POST",
-        headers: {"Content-Type":"application/json", "X-Clave": clave},
+        headers: {"Content-Type":"application/json"},
         body: JSON.stringify({c: comando})
       });
-      if(r.status === 401){
-        clave = ""; sessionStorage.removeItem("clave");
-        estado.textContent = "Clave incorrecta."; return false;
-      }
       if(!r.ok){ estado.textContent = "El servidor no aceptó: " + comando; return false; }
-      sessionStorage.setItem("clave", clave);
       estado.textContent = "Enviado: " + comando;
       return true;
     }catch(e){
@@ -246,7 +235,7 @@
   const teclas = {ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right"};
   addEventListener("keydown", e => {
     const d = teclas[e.key];
-    if(d && modo === "manual" && !(e.repeat && !clave)){
+    if(d && modo === "manual"){
       e.preventDefault();
       const b = document.querySelector(`.dir[data-d="${d}"]`);
       b.classList.add("pres"); enviarComando(d);
