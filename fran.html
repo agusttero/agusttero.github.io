@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Panel de control</title>
+<title>Panel de control - Torreta</title>
 <style>
   :root{
     --bg:#1c2024; --panel:#262b31; --edge:#3a424b; --ink:#e8ecef; --muted:#8d98a3;
@@ -21,12 +21,6 @@
     position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center}
   .camara video{width:100%;height:100%;object-fit:contain;display:none}
   .camara.on video{display:block}
-  .leyenda{position:absolute;left:0;right:0;bottom:0;z-index:2;display:flex;flex-wrap:wrap;gap:6px 14px;
-    justify-content:center;align-items:center;padding:8px 10px;background:rgba(0,0,0,.6);font-size:12px}
-  .chip{display:flex;align-items:center;gap:5px;font:inherit;font-size:12px;color:var(--ink);cursor:pointer;
-    background:transparent;border:1px solid transparent;border-radius:14px;padding:3px 9px}
-  .chip::before{content:"";width:12px;height:12px;border-radius:3px;background:var(--c,#999)}
-  .chip[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
   .camara .msg{color:var(--muted);text-align:center;padding:12px}
   .camara.on .msg{display:none}
   .camara .mira{position:absolute;inset:0;pointer-events:none;display:none}
@@ -51,7 +45,7 @@
   .dir[data-d="right"]{right:0;top:68px}
   .dir[data-d="down"]{left:68px;bottom:0}
 
-  /* Derecha */
+  /* Derecha: Modos y Acciones */
   .der{display:flex;flex-direction:column;gap:26px}
   .modos{display:flex;flex-direction:column;gap:10px}
   .modo{border:2px solid var(--edge);border-radius:8px;background:var(--bg);color:var(--ink);
@@ -78,7 +72,7 @@
 <body>
 <main class="panel">
 
-  <!-- Izquierda: movimiento -->
+  <!-- Izquierda: movimiento manual -->
   <div class="cruceta" role="group" aria-label="Movimiento">
     <button class="dir" data-d="up" aria-label="Arriba"><span>UP</span></button>
     <button class="dir" data-d="left" aria-label="Izquierda"><span>LEFT</span></button>
@@ -86,23 +80,15 @@
     <button class="dir" data-d="down" aria-label="Abajo"><span>DOWN</span></button>
   </div>
 
-  <!-- Centro: cámara -->
+  <!-- Centro: cámara y mira -->
   <section class="camara" id="camara">
     <button class="power" id="power"><i></i><span>Encendido / Apagado</span></button>
     <video id="video" autoplay playsinline muted></video>
     <div class="mira"></div>
-    <div class="leyenda" role="group" aria-label="Color a seguir">
-      <span>Seguir:</span>
-      <button class="chip" data-c="todos" aria-pressed="true">Todos</button>
-      <button class="chip" data-c="rojo" style="--c:#e5484d" aria-pressed="false">Rojo</button>
-      <button class="chip" data-c="verde" style="--c:#3fb950" aria-pressed="false">Verde</button>
-      <button class="chip" data-c="azul" style="--c:#3b82f6" aria-pressed="false">Azul</button>
-      <button class="chip" data-c="amarillo" style="--c:#f2c94c" aria-pressed="false">Amarillo</button>
-    </div>
     <p class="msg" id="msg">Cámara apagada</p>
   </section>
 
-  <!-- Derecha: modos y acciones -->
+  <!-- Derecha: modos y disparo -->
   <div class="der">
     <div class="modos" role="group" aria-label="Modo">
       <button class="modo" id="manual" aria-pressed="true">Manual</button>
@@ -122,7 +108,13 @@
   const estado = $("estado");
   let modo = "manual", laser = false;
 
-  // Los comandos van al servidor Python (mismo túnel que el video) y de ahí al ESP32.
+  // ====== CONFIGURACIÓN ======
+  // Coloca la URL de tu túnel de Cloudflare (sin barra al final)
+  const SERVER_URL = "https://threshold-saskatchewan-multimedia-appointment.trycloudflare.com";
+  const ICE_SERVERS = [{urls:"stun:stun.l.google.com:19302"}];
+  // ============================
+
+  // Enviar comandos al backend Python
   async function enviarComando(comando){
     try{
       const r = await fetch(SERVER_URL + "/cmd", {
@@ -139,14 +131,7 @@
     }
   }
 
-  // ====== CONFIGURACIÓN ======
-  // URL pública (https) de tu servidor Python, sin "/" al final.
-  // Ejemplo con Cloudflare Tunnel: "https://algo-random.trycloudflare.com"
-  const SERVER_URL = "https://threshold-saskatchewan-multimedia-appointment.trycloudflare.com";
-  const ICE_SERVERS = [{urls:"stun:stun.l.google.com:19302"}];
-  // ============================
-
-  // Cámara en vivo por WebRTC (solo recibe video)
+  // Cámara en vivo por WebRTC
   let pc = null;
 
   function esperarICE(conn){
@@ -204,13 +189,13 @@
     if(pc){ desconectarCamara(); estado.textContent = "Cámara apagada."; }
     else conectarCamara();
   });
-  conectarCamara(); // se conecta sola al abrir la página
+  conectarCamara(); // Se conecta sola al cargar
 
-  // Modo manual / automático
+  // Selector Modo Manual / Automático
   function setModo(m){
     if(m === modo) return;
     modo = m;
-    laser = (m === "auto"); // el servidor prende el láser en automático y lo apaga al volver
+    laser = (m === "auto"); // En automático se enciende el láser de ayuda
     $("laser").setAttribute("aria-pressed", laser);
     $("manual").setAttribute("aria-pressed", m === "manual");
     $("auto").setAttribute("aria-pressed", m === "auto");
@@ -220,8 +205,7 @@
   $("manual").onclick = () => setModo("manual");
   $("auto").onclick = () => setModo("auto");
 
-  // Movimiento
-  // Mantener apretado = movimiento continuo
+  // Control de Movimiento Manual (Cruceta)
   let repetir = null, presionado = false;
   function parar(){ presionado = false; clearInterval(repetir); repetir = null; }
   document.querySelectorAll(".dir").forEach(b => {
@@ -232,30 +216,26 @@
     });
     ["pointerup","pointerleave","pointercancel"].forEach(ev => b.addEventListener(ev, parar));
   });
+
+  // Control por teclado (flechas del teclado)
   const teclas = {ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right"};
   addEventListener("keydown", e => {
     const d = teclas[e.key];
     if(d && modo === "manual"){
       e.preventDefault();
       const b = document.querySelector(`.dir[data-d="${d}"]`);
-      b.classList.add("pres"); enviarComando(d);
+      if(b){ b.classList.add("pres"); enviarComando(d); }
     }
   });
   addEventListener("keyup", e => {
     const d = teclas[e.key];
-    if(d) document.querySelector(`.dir[data-d="${d}"]`).classList.remove("pres");
+    if(d){
+      const b = document.querySelector(`.dir[data-d="${d}"]`);
+      if(b) b.classList.remove("pres");
+    }
   });
 
-  // Elegir qué color seguir
-  document.querySelectorAll(".chip").forEach(b => {
-    b.onclick = async () => {
-      if(await enviarComando("color_" + b.dataset.c)){
-        document.querySelectorAll(".chip").forEach(x => x.setAttribute("aria-pressed", x === b));
-      }
-    };
-  });
-
-  // Disparar y láser
+  // Acciones: Disparar y Láser
   $("disparar").onclick = () => enviarComando("disparar");
   $("laser").onclick = () => {
     laser = !laser;
